@@ -1,0 +1,50 @@
+name: Résumé du matin
+
+on:
+  schedule:
+    # Heures en UTC. Les deux lignes couvrent l'heure d'été et l'heure d'hiver ;
+    # le script n'envoie que celle qui tombe à TARGET_HOUR (heure de Paris).
+    # Déclenchement 10 min avant l'heure, car GitHub a souvent quelques minutes de retard.
+    - cron: '50 5 * * *'
+    - cron: '50 6 * * *'
+  workflow_dispatch: # bouton « Run workflow » pour tester à tout moment
+
+permissions:
+  contents: write # uniquement pour le commit « keepalive » ci-dessous
+
+jobs:
+  reveil:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Installer web-push
+        run: npm install --no-save --no-audit --no-fund web-push@3.6.7
+
+      - name: Envoyer le réveil au téléphone
+        run: node scripts/send-push.mjs
+        env:
+          PUSH_CONFIG: ${{ secrets.PUSH_CONFIG }}
+          SCHEDULE: ${{ github.event.schedule }}
+          TZ_NAME: Europe/Paris
+          TARGET_HOUR: 8
+
+      # GitHub désactive les tâches programmées d'un dépôt sans activité depuis 60 jours.
+      # Un commit vide toutes les ~6 semaines garde le résumé actif.
+      - name: Garder le workflow actif
+        if: github.event_name == 'schedule'
+        run: |
+          last=$(git log -1 --format=%ct)
+          age=$(( ($(date +%s) - last) / 86400 ))
+          if [ "$age" -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "keepalive: maintient le résumé quotidien actif"
+            git push
+          else
+            echo "Dernier commit il y a $age jours, rien à faire."
+          fi
