@@ -1,7 +1,7 @@
 /* Service worker : fonctionnement hors ligne + résumé du matin. */
 importScripts('./shared.js');
 
-const CACHE = 'echeances-v1';
+const CACHE = 'echeances-v2';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './shared.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/badge-96.png',

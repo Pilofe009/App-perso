@@ -1,13 +1,17 @@
 # Échéances
 
-Application pour téléphone Android : tâches avec échéances, matrice importance/urgence mise à jour chaque jour, suivi des abonnements et résumé du matin à 8h.
+Application pour téléphone Android : tâches avec échéances, matrice importance/urgence mise à jour chaque jour, gestion du budget, suivi des abonnements et résumé du matin à 8h.
 
 - **Aujourd'hui** : les tâches en retard, celles du jour et celles qui arrivent bientôt, les fins d'essai et les paiements de la semaine.
 - **Tâches** : ajouter, cocher, répéter (chaque jour, semaine, mois ou année), classer par catégorie.
 - **Matrice** : *Faire maintenant / Planifier / Expédier / Plus tard*. Tu choisis l'importance (★). L'urgence se calcule seule à partir de l'échéance (par défaut, moins de 3 jours).
-- **Abos** : montant, fréquence, prochain paiement calculé automatiquement, total par mois et par an, alerte avant la fin d'un essai gratuit.
+- **Budget**, avec trois sous-onglets :
+  - **Mois** : solde du mois, revenus, dépenses par catégorie face au budget (avec une alerte en cas de dépassement), répartition de tes dépenses et liste des opérations. Touche une catégorie pour changer son budget (ce mois-ci seulement, ou à partir de ce mois) ou pour corriger directement son total, comme dans un tableur.
+  - **Bilan** : revenus et dépenses sur 3, 6 ou 12 mois, solde cumulé, et moyenne par catégorie comparée au budget.
+  - **Abos** : montant, fréquence, prochain paiement calculé automatiquement, total par mois et par an, alerte avant la fin d'un essai gratuit. Les abonnements remplissent tout seuls la catégorie « Dépenses récurrentes ».
+  - Les gains (Gamble, remboursements) se saisissent avec l'option « Gain ou remboursement » : ils réduisent les dépenses de la catégorie.
 - **Calendrier** : tâches et paiements sur le mois.
-- **Réglages** : seuils d'urgence et d'alerte, catégories, export et import de sauvegarde, notifications.
+- **Réglages** : seuils d'urgence et d'alerte, catégories des tâches et du budget, export et import de sauvegarde, notifications.
 
 Tes données restent **uniquement sur ton téléphone**. GitHub envoie seulement un « réveil » vide chaque matin, puis le téléphone construit le résumé lui-même.
 
