@@ -47,18 +47,43 @@ Tes données restent **uniquement sur ton téléphone**. GitHub envoie seulement
    - Clique sur **Add secret**.
 4. Ouvre l'onglet **Actions** du dépôt. Si GitHub le demande, active les workflows. Clique ensuite sur **Résumé du matin**, puis **Run workflow**. Une notification doit arriver sur ton téléphone en moins d'une minute.
 
-C'est fini : chaque matin vers 8h, tu recevras ton point du jour.
+### 4. Déclencher le résumé chaque jour à 8h pile (cron-job.org)
+
+Les tâches programmées de GitHub arrivent souvent avec plusieurs heures de retard. C'est donc le service gratuit **cron-job.org** qui lance le résumé à 8h00 pile.
+
+**a. Créer une clé d'accès GitHub** (elle ne permet que de lancer le résumé de ce dépôt) :
+1. Sur GitHub, touche ta photo de profil, puis **Settings**, **Developer settings**, **Personal access tokens**, **Fine-grained tokens**, et **Generate new token**.
+2. *Token name* : `cron-job résumé`. *Expiration* : la durée la plus longue proposée.
+3. *Repository access* : **Only select repositories**, puis choisis `App-perso`.
+4. *Permissions* : clique sur **Add permissions**, choisis **Actions**, puis règle-la sur **Read and write**.
+5. Clique sur **Generate token** et copie la clé (elle commence par `github_pat_`). Elle ne s'affiche qu'une seule fois.
+
+**b. Créer la tâche sur cron-job.org** :
+1. Crée un compte gratuit sur <https://cron-job.org>, puis clique sur **Create cronjob**.
+2. Onglet **Common** :
+   - *Title* : `Résumé du matin`
+   - *URL* : `https://api.github.com/repos/Pilofe009/App-perso/actions/workflows/resume-quotidien.yml/dispatches`
+   - *Execution schedule* : **Every day at 8:00**. Vérifie que le fuseau horaire est **Europe/Paris**.
+3. Onglet **Advanced** :
+   - *Request method* : **POST**
+   - *Headers* : ajoute ces trois en-têtes :
+     - `Authorization` → `Bearer github_pat_…` (ta clé)
+     - `Accept` → `application/vnd.github+json`
+     - `Content-Type` → `application/json`
+   - *Request body* : `{"ref":"main"}`
+4. Enregistre, puis utilise **Test run**. La réponse doit être **204** et une notification doit arriver sur ton téléphone dans la minute.
+
+C'est fini : chaque matin à 8h, tu recevras ton point du jour.
 
 ---
 
 ## Bon à savoir
 
 - **Sauvegarde** : tes données ne sont que sur ce téléphone. Fais régulièrement un **Exporter** dans Réglages, par exemple pour l'envoyer sur ton Drive. Si tu changes de téléphone, utilise **Importer**.
-- **Retards** : GitHub démarre parfois ses tâches programmées avec quelques minutes de retard. Le déclenchement est donc prévu à 7h50 pour une arrivée vers 8h.
 - **Notifications qui n'arrivent plus** : si l'app affiche « Notifications à reconfigurer », va dans Réglages, touche **Mettre à jour**, puis recopie la configuration dans le secret `PUSH_CONFIG`. GitHub t'envoie aussi un e-mail si l'envoi échoue.
 - **Batterie** : si les notifications arrivent en retard, dans les paramètres Android, va dans Applications, puis Chrome, puis Batterie, et choisis **Sans restriction**.
-- **Changer l'heure** : dans `.github/workflows/resume-quotidien.yml`, modifie `TARGET_HOUR`, puis décale les deux lignes `cron` (heure UTC : heure voulue − 2 pour l'été, − 1 pour l'hiver, à HH:50 de l'heure précédente).
-- **Inactivité** : GitHub met en pause les tâches programmées d'un dépôt inactif depuis 60 jours. Le workflow fait lui-même un petit commit toutes les ~6 semaines pour l'éviter.
+- **Changer l'heure** : modifie simplement l'horaire de la tâche sur cron-job.org.
+- **Clé expirée** : quand la clé GitHub expire, GitHub te prévient par e-mail et cron-job.org signale des erreurs (code 401). Crée alors une nouvelle clé (étape 4a) et remplace-la dans l'en-tête `Authorization` sur cron-job.org.
 
 ## Fichiers
 
@@ -68,4 +93,4 @@ C'est fini : chaque matin vers 8h, tu recevras ton point du jour.
 | `shared.js` | Calcul des dates, de la matrice et du résumé (partagé avec le service worker) |
 | `sw.js` | Service worker : mode hors ligne et affichage du résumé |
 | `manifest.webmanifest`, `icons/` | Installation sur l'écran d'accueil |
-| `.github/workflows/resume-quotidien.yml`, `scripts/send-push.mjs` | Réveil quotidien envoyé par GitHub Actions |
+| `.github/workflows/resume-quotidien.yml`, `scripts/send-push.mjs` | Réveil quotidien envoyé par GitHub Actions (lancé à 8h par cron-job.org) |

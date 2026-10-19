@@ -8,23 +8,6 @@ if (!raw) {
   process.exit(1);
 }
 
-const tz = process.env.TZ_NAME || 'Europe/Paris';
-const targetHour = Number(process.env.TARGET_HOUR || 8);
-const schedule = (process.env.SCHEDULE || '').trim();
-
-// Deux déclenchements sont programmés (heure d'été / heure d'hiver) : on ne garde que celui
-// qui tombe à l'heure voulue dans le fuseau local. Un lancement manuel envoie toujours.
-if (schedule) {
-  const [min, hour] = schedule.split(/\s+/).map(Number);
-  const aimed = new Date();
-  aimed.setUTCHours(hour + (min > 0 ? 1 : 0), 0, 0, 0);
-  const localHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: 'numeric', hourCycle: 'h23' }).format(aimed));
-  if (localHour !== targetHour) {
-    console.log(`Déclenchement "${schedule}" = ${localHour}h à ${tz} : ignoré (cible ${targetHour}h).`);
-    process.exit(0);
-  }
-}
-
 let cfg;
 try {
   cfg = JSON.parse(raw);
