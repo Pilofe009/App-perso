@@ -104,11 +104,14 @@
       .sort((a, b) => a.date.localeCompare(b.date));
     const dateLine = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
-    let html = `<p class="date-line">${dateLine}</p>`;
+    const h = new Date().getHours();
+    const hello = h < 5 ? 'Bonne nuit' : h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
+    const first = window.Sync && window.Sync.user && window.Sync.user.name ? window.Sync.user.name.split(' ')[0] : '';
+    let html = `<div class="hello"><p class="date-line">${dateLine}</p><h2>${hello}${first ? ` <em>${esc(first)}</em>` : ''}</h2></div>`;
     html += `<div class="stats">
-      <div class="stat ${sum.overdue.length ? 'alert' : ''}"><b>${sum.overdue.length}</b><span>En retard</span></div>
-      <div class="stat"><b>${sum.dueToday.length}</b><span>Aujourd'hui</span></div>
-      <div class="stat"><b>${sum.soon.length}</b><span>Dans ${s.soonDays} j</span></div>
+      <div class="stat ${sum.overdue.length ? 'alert' : ''}"><b data-count="${sum.overdue.length}">${sum.overdue.length}</b><span>En retard</span></div>
+      <div class="stat"><b data-count="${sum.dueToday.length}">${sum.dueToday.length}</b><span>Aujourd'hui</span></div>
+      <div class="stat"><b data-count="${sum.soon.length}">${sum.soon.length}</b><span>Dans ${s.soonDays} j</span></div>
     </div>`;
 
     const bm = E.budgetMonth(state, today.slice(0, 7), today);
@@ -117,7 +120,7 @@
       html += `<div class="card tap budget-mini" data-action="open-budget">
         <div><b>Budget ${((m) => (/^[aeiouâ]/.test(m) ? "d'" : 'de ') + m)(E.parse(today).toLocaleDateString('fr-FR', { month: 'long' }))}</b>
           <small>${left >= 0 ? `Reste ${E.money(left)} à dépenser` : `⚠️ Budget dépassé de ${E.money(-left)}`}</small></div>
-        <div class="right"><span class="${bm.balance < 0 ? 'neg' : bm.balance > 0 ? 'pos' : ''}">${signed(bm.balance)}</span><small>solde</small></div>
+        <div class="right"><span class="${bm.balance < 0 ? 'neg' : bm.balance > 0 ? 'pos' : ''}" data-count="${bm.balance}" data-fmt="signed">${signed(bm.balance)}</span><small>solde</small></div>
       </div>`;
     }
 
@@ -211,8 +214,8 @@
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(({ s, date }) => subRow(s, date));
     return `<div class="totals">
-        <div class="stat"><b>${E.money(monthly)}</b><span>par mois</span></div>
-        <div class="stat"><b>${E.money(monthly * 12)}</b><span>par an</span></div>
+        <div class="stat"><b data-count="${monthly}" data-fmt="money">${E.money(monthly)}</b><span>par mois</span></div>
+        <div class="stat"><b data-count="${monthly * 12}" data-fmt="money">${E.money(monthly * 12)}</b><span>par an</span></div>
       </div>` + section('Prochains paiements', state.subs.length, list(rows));
   }
 
@@ -280,7 +283,7 @@
     let html = monthNav(ymLabel(ym));
     html += `<div class="card hero">
       <span class="hero-label">Solde du mois</span>
-      <b class="hero-num ${m.balance < 0 ? 'neg' : m.balance > 0 ? 'pos' : ''}">${signed(m.balance)}</b>
+      <b class="hero-num ${m.balance < 0 ? 'neg' : m.balance > 0 ? 'pos' : ''}" data-count="${m.balance}" data-fmt="signed">${signed(m.balance)}</b>
       <div class="hero-sub"><span>Revenus <b>${E.money(m.totalIncome)}</b></span><span>Dépenses <b>${E.money(m.totalSpent)}</b></span></div>
       <div class="meter"><i class="${over ? 'over' : ''}" style="width:${pct}%"></i></div>
       <div class="hero-foot">${over
@@ -553,6 +556,12 @@
       <div class="btns" style="margin-top:8px"><button class="btn small" data-action="add-cat">+ Ajouter une catégorie</button></div>
     </div>`;
 
+    const appearance = `<div class="card">
+      <h3>🎨 Apparence</h3>
+      <div class="seg theme-pick">${[['auto', 'Auto'], ['light', 'Clair'], ['dark', 'Sombre']]
+        .map(([k, l]) => `<button class="seg-btn ${getTheme() === k ? 'on' : ''}" data-theme-choice="${k}">${l}</button>`).join('')}</div>
+    </div>`;
+
     const bcatRows = (type) => state.budgetCats.filter((c) => c.type === type).map((c) => `<div class="cat-row">
         <span class="swatch" style="background:${type === 'income' ? 'var(--pos)' : slotColor(c)}"></span>
         <input type="text" value="${esc(c.name)}" data-bcat-name="${esc(c.id)}" aria-label="Nom">
@@ -581,7 +590,7 @@
 
     return `<div class="settings">
       <button class="back" data-action="back"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>Retour</button>
-      ${syncCard()}${notif}${rules}${cats}${bcats}${data}
+      ${syncCard()}${appearance}${notif}${rules}${cats}${bcats}${data}
       <p class="matrix-help" style="text-align:center">Échéances · v3</p>
     </div>`;
   }
@@ -647,7 +656,15 @@
   /* ---------- Rendu principal ---------- */
   function render() {
     const R = { today: renderToday, tasks: renderTasks, matrix: renderMatrix, budget: renderBudget, calendar: renderCalendar, settings: renderSettings };
-    $('#view').innerHTML = R[view]();
+    const main = $('#view');
+    main.innerHTML = R[view]();
+    main.classList.remove('enter');
+    if (ui.animate) {
+      void main.offsetWidth; // relance l'animation
+      main.classList.add('enter');
+      countUp(main);
+      ui.animate = false;
+    }
     $('#view-title').textContent = TITLES[view];
     document.querySelectorAll('#tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
     $('#fab').hidden = view === 'settings';
@@ -656,6 +673,7 @@
   }
 
   function setView(v) {
+    ui.animate = true;
     if (v === 'settings' && view !== 'settings') history.pushState({ settings: true }, '');
     if (v !== 'settings' && view === 'settings' && history.state && history.state.settings) {
       view = v; history.back(); render(); return;
@@ -664,6 +682,86 @@
     render();
     window.scrollTo(0, 0);
   }
+
+  /* ---------- Effets ---------- */
+  const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Les chiffres défilent jusqu'à leur valeur.
+  function countUp(root) {
+    if (reducedMotion()) return;
+    root.querySelectorAll('[data-count]').forEach((el) => {
+      const to = Number(el.dataset.count);
+      if (!to) return;
+      const fmt = el.dataset.fmt;
+      const show = (v) => { el.textContent = fmt === 'signed' ? signed(E.round2(v)) : fmt === 'money' ? E.money(v) : String(Math.round(v)); };
+      const t0 = performance.now();
+      const dur = 750;
+      let done = false;
+      show(0);
+      const step = (t) => {
+        if (done) return;
+        const k = Math.min(1, (t - t0) / dur);
+        show(k < 1 ? to * (1 - Math.pow(1 - k, 3)) : to);
+        if (k < 1) requestAnimationFrame(step); else done = true;
+      };
+      requestAnimationFrame(step);
+      // Filet de sécurité : si les animations sont suspendues (économie d'énergie…), la vraie valeur s'affiche quand même.
+      setTimeout(() => { if (!done) { done = true; show(to); } }, dur + 80);
+    });
+  }
+
+  // Petite pluie de confettis (tâche importante terminée, objectif atteint).
+  function confetti() {
+    if (reducedMotion()) return;
+    const c = document.createElement('canvas');
+    c.className = 'confetti';
+    document.body.appendChild(c);
+    const W = innerWidth;
+    const H = innerHeight;
+    const dpr = devicePixelRatio || 1;
+    c.width = W * dpr; c.height = H * dpr;
+    const g = c.getContext('2d');
+    g.scale(dpr, dpr);
+    const colors = ['#3b6cff', '#22d3ee', '#a78bfa', '#34d399', '#fbbf24', '#fb7185'];
+    const parts = Array.from({ length: 110 }, () => ({
+      x: W / 2 + (Math.random() - 0.5) * 60, y: H * 0.6,
+      vx: (Math.random() - 0.5) * 14, vy: -Math.random() * 14 - 6,
+      r: Math.random() * 6 + 5, a: Math.random() * 6.3, va: (Math.random() - 0.5) * 0.35,
+      c: colors[Math.floor(Math.random() * colors.length)],
+    }));
+    const t0 = performance.now();
+    const frame = (t) => {
+      const k = (t - t0) / 1800;
+      g.clearRect(0, 0, W, H);
+      parts.forEach((p) => {
+        p.vy += 0.38; p.vx *= 0.985; p.x += p.vx; p.y += p.vy; p.a += p.va;
+        g.save();
+        g.globalAlpha = Math.max(0, 1 - k * k);
+        g.translate(p.x, p.y); g.rotate(p.a);
+        g.fillStyle = p.c;
+        g.fillRect(-p.r / 2, -p.r / 4, p.r, p.r / 2);
+        g.restore();
+      });
+      if (k < 1) requestAnimationFrame(frame); else c.remove();
+    };
+    requestAnimationFrame(frame);
+    setTimeout(() => c.remove(), 2500); // au cas où les animations seraient suspendues
+  }
+
+  /* ---------- Apparence (thème) ---------- */
+  const THEME_COLORS = { light: '#eef2fb', dark: '#060912' };
+  function getTheme() {
+    try { return localStorage.getItem('theme') || 'auto'; } catch (e) { return 'auto'; }
+  }
+  function applyTheme(choice) {
+    const root = document.documentElement;
+    if (choice === 'light' || choice === 'dark') root.dataset.theme = choice; else root.removeAttribute('data-theme');
+    const dark = choice === 'dark' || (choice !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+    const meta = document.querySelector('meta[name=theme-color]');
+    if (meta) meta.setAttribute('content', dark ? THEME_COLORS.dark : THEME_COLORS.light);
+  }
+  applyTheme(getTheme());
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme(getTheme()));
 
   /* ---------- Feuilles (formulaires) ---------- */
   const sheet = $('#sheet');
@@ -682,7 +780,7 @@
   sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(); });
   window.addEventListener('popstate', () => {
     if (sheet.open) { sheet.close(); return; }
-    if (view === 'settings') { view = 'today'; render(); }
+    if (view === 'settings') { view = 'today'; ui.animate = true; render(); }
   });
 
   const catOptions = (sel) => `<option value="">Aucune</option>` +
@@ -940,6 +1038,7 @@
     state.transactions.push({ id: uid(), date: fd.get('date'), cat: g.cat, amount, label: `Épargne : ${g.name}`, goal: g.id });
     save(); closeSheet(); render();
     const p = goalProgress(g);
+    if (p.done && !wasDone) confetti();
     toast(p.done && !wasDone ? `🎉 Objectif « ${g.name} » atteint !` : `🎯 ${g.name} : ${Math.round(p.pct)} %`, null, 3500);
   }
 
@@ -1024,6 +1123,7 @@
     t.done = true;
     t.doneAt = new Date().toISOString();
     let msg = 'Bravo, tâche terminée !';
+    if (t.important) { confetti(); msg = 'Bravo, une tâche importante de moins ! 🎉'; }
     if (t.repeat && t.repeat !== 'none' && t.due) {
       const anchor = t.anchor || t.due;
       // prochaine occurrence après l'échéance actuelle ET après aujourd'hui
@@ -1179,7 +1279,7 @@
 
   /* ---------- Événements ---------- */
   document.addEventListener('click', (e) => {
-    const el = e.target.closest('[data-view], [data-view-link], [data-edit-task], [data-edit-sub], [data-edit-tx], [data-edit-goal], [data-deposit], [data-bcat], [data-btab], [data-bmonth], [data-range], [data-bar], [data-goto-month], [data-filter], [data-cat], [data-cal-nav], [data-day], [data-action], #btn-settings, #fab');
+    const el = e.target.closest('[data-view], [data-view-link], [data-edit-task], [data-edit-sub], [data-edit-tx], [data-theme-choice], [data-edit-goal], [data-deposit], [data-bcat], [data-btab], [data-bmonth], [data-range], [data-bar], [data-goto-month], [data-filter], [data-cat], [data-cal-nav], [data-day], [data-action], #btn-settings, #fab');
     if (!el) return;
     const d = el.dataset;
 
@@ -1199,7 +1299,12 @@
     if (d.editGoal) return openGoalForm(d.editGoal);
     if (d.deposit) return openDepositForm(d.deposit);
     if (d.bcat) return openBudgetCat(d.bcat);
-    if (d.btab) { ui.budgetTab = d.btab; return render(); }
+    if (d.btab) { ui.budgetTab = d.btab; ui.animate = true; return render(); }
+    if (d.themeChoice) {
+      try { localStorage.setItem('theme', d.themeChoice); } catch (e) { /* stockage indisponible */ }
+      applyTheme(d.themeChoice);
+      return render();
+    }
     if (d.bmonth) { ui.budgetMonth = E.addMonthsYm(ui.budgetMonth, Number(d.bmonth)); ui.statsSel = null; return render(); }
     if (d.range) { ui.statsRange = Number(d.range); ui.statsSel = null; return render(); }
     if (d.bar) { ui.statsSel = Number(d.bar); return render(); }
@@ -1356,6 +1461,7 @@
   /* ---------- Démarrage ---------- */
   (async function start() {
     await load();
+    ui.animate = true;
     render();
     stateReady = true;
     attachSync();
