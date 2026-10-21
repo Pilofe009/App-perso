@@ -162,12 +162,28 @@
     trials.forEach((x) => lines.push(`⏳ Fin d'essai ${x.name} ${relDay(x.trialEnd, today)}`));
     if (!lines.length) lines.push('Rien d’urgent aujourd’hui. Profite ! ✨');
 
-    const MAX = 8;
-    const body = lines.length > MAX
-      ? lines.slice(0, MAX - 1).concat(`… et ${lines.length - MAX + 1} autre(s)`).join('\n')
-      : lines.join('\n');
+    // Budget du mois : ce qu'il reste, et les catégories à 80 % ou plus.
+    const budgetLines = [];
+    const ym = today.slice(0, 7);
+    if (((state && state.transactions) || []).some((t) => t.date.slice(0, 7) === ym)) {
+      const bm = budgetMonth(state, ym, today);
+      const left = round2(bm.totalBudget - bm.totalSpent);
+      const daysLeft = daysBetween(today, monthEnd(ym)) + 1;
+      if (bm.totalBudget > 0) {
+        budgetLines.push(left >= 0
+          ? `💰 Reste ${money(left)} de budget pour ${daysLeft} j`
+          : `💸 Budget du mois dépassé de ${money(-left)}`);
+      }
+      bm.expenses.filter((l) => l.budget > 0 && l.total >= 0.8 * l.budget)
+        .sort((a, b) => b.total / b.budget - a.total / a.budget).slice(0, 2)
+        .forEach((l) => budgetLines.push(`${l.total >= l.budget ? '🔴' : '🟠'} ${l.cat.name} : ${Math.round((l.total / l.budget) * 100)} % du budget`));
+    }
 
-    return { title, body, overdue, dueToday, soon, payments, trials };
+    const MAX = 8 - budgetLines.length;
+    const shown = lines.length > MAX ? lines.slice(0, MAX - 1).concat(`… et ${lines.length - MAX + 1} autre(s)`) : lines;
+    const body = shown.concat(budgetLines).join('\n');
+
+    return { title, body, overdue, dueToday, soon, payments, trials, budgetLines };
   }
 
   /* ---------- Budget ---------- */
@@ -236,10 +252,67 @@
     };
   }
 
+  /* ---------- Synchronisation : conversion état ⇄ documents en ligne ----------
+     Partagé entre sync.js (navigateur) et scripts/send-push.mjs (GitHub). */
+  const SYNC_LISTS = { tasks: 'task', subs: 'sub', transactions: 'tx', categories: 'cat', budgetCats: 'bcat', goals: 'goal' };
+  const SYNC_ORDERED = { categories: 1, budgetCats: 1, goals: 1 }; // listes dont l'ordre d'affichage compte
+  const META_KEY = 'meta_main';
+
+  function toItems(state) {
+    const items = {};
+    Object.keys(SYNC_LISTS).forEach((list) => {
+      (state[list] || []).forEach((it, i) => {
+        if (!it || it.id == null) return;
+        items[`${SYNC_LISTS[list]}_${it.id}`] = { kind: SYNC_LISTS[list], json: JSON.stringify(it), order: SYNC_ORDERED[list] ? i : 0 };
+      });
+    });
+    items[META_KEY] = {
+      kind: 'meta', order: 0,
+      json: JSON.stringify({ settings: state.settings || {}, budgetOverrides: state.budgetOverrides || {} }),
+    };
+    return items;
+  }
+
+  function fromItems(items) {
+    const out = {};
+    const listOf = {};
+    Object.keys(SYNC_LISTS).forEach((l) => { out[l] = []; listOf[SYNC_LISTS[l]] = l; });
+    let hasMeta = false;
+    Object.values(items).sort((a, b) => a.order - b.order).forEach((it) => {
+      if (it.kind === 'meta') { Object.assign(out, JSON.parse(it.json)); hasMeta = true; return; }
+      if (listOf[it.kind]) out[listOf[it.kind]].push(JSON.parse(it.json));
+    });
+    // Rien en ligne encore : on laisse l'app remettre les catégories par défaut.
+    if (!hasMeta) { delete out.categories; delete out.budgetCats; }
+    return out;
+  }
+
+  const syncSig = (it) => `${it.order}|${it.json}`;
+  function syncDiff(base, items) {
+    return {
+      set: Object.keys(items).filter((k) => !base[k] || syncSig(base[k]) !== syncSig(items[k])),
+      del: Object.keys(base).filter((k) => !items[k]),
+    };
+  }
+
+  // Premier branchement d'un appareil : la version en ligne gagne, et les éléments qui n'existent
+  // que sur cet appareil sont ajoutés (rien n'est supprimé). Si le compte est déjà utilisé, ses
+  // catégories font foi : on n'y rajoute pas les catégories par défaut d'un nouvel appareil.
+  function mergeFirstLink(local, remote) {
+    const inUse = !!remote[META_KEY];
+    const merged = {};
+    Object.keys(local).forEach((k) => {
+      const kind = local[k].kind;
+      if (!(inUse && (kind === 'cat' || kind === 'bcat'))) merged[k] = local[k];
+    });
+    return Object.assign(merged, remote);
+  }
+
   root.E = {
     kvGet, kvSet, fmt, parse, todayStr, addDays, addMonths, daysBetween, occurrence,
     nextOccurrence, occurrencesBetween, DEFAULT_SETTINGS, isUrgent, quadrant,
     subNextPayment, monthlyCost, money, relDay, buildSummary,
     DEFAULT_BUDGET_CATS, round2, monthEnd, addMonthsYm, budgetAt, budgetMonth,
+    toItems, fromItems, syncDiff, mergeFirstLink,
   };
 })(typeof self !== 'undefined' ? self : this);

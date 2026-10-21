@@ -6,59 +6,8 @@
 import { firebaseConfig } from './firebase-config.js';
 
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2';
-const LISTS = { tasks: 'task', subs: 'sub', transactions: 'tx', categories: 'cat', budgetCats: 'bcat' };
-const ORDERED = new Set(['categories', 'budgetCats']); // listes dont l'ordre d'affichage compte
-const META_KEY = 'meta_main';
-
-/* ---------- Logique pure (testable sans Firebase) ---------- */
-export function toItems(state) {
-  const items = {};
-  for (const [list, kind] of Object.entries(LISTS)) {
-    (state[list] || []).forEach((it, i) => {
-      if (!it || it.id == null) return;
-      items[`${kind}_${it.id}`] = { kind, json: JSON.stringify(it), order: ORDERED.has(list) ? i : 0 };
-    });
-  }
-  items[META_KEY] = {
-    kind: 'meta', order: 0,
-    json: JSON.stringify({ settings: state.settings || {}, budgetOverrides: state.budgetOverrides || {} }),
-  };
-  return items;
-}
-
-export function fromItems(items) {
-  const out = { tasks: [], subs: [], transactions: [], categories: [], budgetCats: [] };
-  const listOf = Object.fromEntries(Object.entries(LISTS).map(([l, k]) => [k, l]));
-  let hasMeta = false;
-  Object.values(items).sort((a, b) => a.order - b.order).forEach((it) => {
-    if (it.kind === 'meta') { Object.assign(out, JSON.parse(it.json)); hasMeta = true; return; }
-    if (listOf[it.kind]) out[listOf[it.kind]].push(JSON.parse(it.json));
-  });
-  // Rien en ligne encore : on laisse l'app remettre les catégories par défaut.
-  if (!hasMeta) { delete out.categories; delete out.budgetCats; }
-  return out;
-}
-
-const sig = (it) => `${it.order}|${it.json}`;
-
-export function diff(base, items) {
-  const set = Object.keys(items).filter((k) => !base[k] || sig(base[k]) !== sig(items[k]));
-  const del = Object.keys(base).filter((k) => !items[k]);
-  return { set, del };
-}
-
-// Premier branchement d'un appareil : la version en ligne gagne, et les tâches, abonnements
-// et opérations qui n'existent que sur cet appareil sont ajoutés (rien n'est supprimé).
-// Si le compte est déjà utilisé, ses catégories font foi : on n'y rajoute pas les catégories
-// par défaut d'un nouvel appareil (sinon une catégorie supprimée reviendrait).
-export function mergeFirstLink(local, remote) {
-  const inUse = !!remote[META_KEY];
-  const merged = {};
-  Object.entries(local).forEach(([k, it]) => {
-    if (!(inUse && (it.kind === 'cat' || it.kind === 'bcat'))) merged[k] = it;
-  });
-  return Object.assign(merged, remote);
-}
+const { toItems, fromItems, mergeFirstLink } = E; // logique pure, dans shared.js
+const diff = E.syncDiff;
 
 /* ---------- Branchement Firebase ---------- */
 const hasWindow = typeof window !== 'undefined';
@@ -171,6 +120,18 @@ Sync.signOut = async () => {
 Sync.push = (state) => {
   if (!Sync.user || !db || linking || !base) return;
   writeDiff(toItems(state));
+};
+
+// Enregistre cet appareil pour le résumé du matin (users/{uid}/devices/{id}) :
+// GitHub y lit l'adresse de notification et construit le résumé à partir des données en ligne.
+Sync.registerDevice = async (deviceId, info) => {
+  if (!Sync.user || !db) throw new Error('Connecte-toi d’abord (carte Synchronisation).');
+  await fb.setDoc(fb.doc(db, 'users', Sync.user.uid, 'devices', deviceId), { ...info, updatedAt: fb.serverTimestamp() });
+};
+
+Sync.unregisterDevice = async (deviceId) => {
+  if (!Sync.user || !db) return;
+  await fb.deleteDoc(fb.doc(db, 'users', Sync.user.uid, 'devices', deviceId));
 };
 
 // L'app se branche une fois ses données locales chargées.

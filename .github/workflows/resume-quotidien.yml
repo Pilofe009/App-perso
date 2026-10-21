@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  reveil:
+  resume:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -19,10 +19,11 @@ jobs:
         with:
           node-version: 22
 
-      - name: Installer web-push
-        run: npm install --no-save --no-audit --no-fund web-push@3.6.7
+      - name: Installer les outils
+        run: npm install --no-save --no-audit --no-fund web-push@3.6.7 firebase-admin@12.7.0
 
-      - name: Envoyer le réveil au téléphone
+      - name: Construire et envoyer le résumé
         run: node scripts/send-push.mjs
         env:
-          PUSH_CONFIG: ${{ secrets.PUSH_CONFIG }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          TZ_NAME: Europe/Paris

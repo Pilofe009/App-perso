@@ -37,6 +37,7 @@
     s.budgetCats = s.budgetCats || JSON.parse(JSON.stringify(E.DEFAULT_BUDGET_CATS));
     s.transactions = s.transactions || [];
     s.budgetOverrides = s.budgetOverrides || {};
+    s.goals = s.goals || [];
     return s;
   }
   async function load() { state = withDefaults((await E.kvGet('state')) || {}); }
@@ -104,9 +105,6 @@
     const dateLine = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
     let html = `<p class="date-line">${dateLine}</p>`;
-    if (ui.push && ui.push.changed) {
-      html += `<div class="card" data-view-link="settings"><b>⚠️ Notifications à reconfigurer</b><br><small>Ton téléphone a changé d'abonnement aux notifications. Ouvre les Réglages pour mettre à jour GitHub.</small></div>`;
-    }
     html += `<div class="stats">
       <div class="stat ${sum.overdue.length ? 'alert' : ''}"><b>${sum.overdue.length}</b><span>En retard</span></div>
       <div class="stat"><b>${sum.dueToday.length}</b><span>Aujourd'hui</span></div>
@@ -223,9 +221,10 @@
   const CHEVRON_R = '<svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>';
 
   function renderBudget() {
-    const tabs = [['month', 'Mois'], ['stats', 'Bilan'], ['subs', 'Abos']]
+    const tabs = [['month', 'Mois'], ['stats', 'Bilan'], ['goals', 'Objectifs'], ['subs', 'Abos']]
       .map(([k, l]) => `<button class="seg-btn ${ui.budgetTab === k ? 'on' : ''}" data-btab="${k}">${l}</button>`).join('');
-    const body = ui.budgetTab === 'subs' ? renderSubs() : ui.budgetTab === 'stats' ? renderBudgetStats() : renderBudgetMonth();
+    const R = { subs: renderSubs, stats: renderBudgetStats, goals: renderGoals, month: renderBudgetMonth };
+    const body = (R[ui.budgetTab] || renderBudgetMonth)();
     return `<div class="seg">${tabs}</div>${body}`;
   }
 
@@ -392,17 +391,66 @@
 
     const expCats = state.budgetCats.filter((c) => c.type === 'expense');
     const last = data[data.length - 1];
+    const catTotal = (d, id) => (d.expenses.find((l) => l.cat.id === id) || { total: 0 }).total;
     const rows = expCats.map((c) => {
-      const a = avg((d) => (d.expenses.find((l) => l.cat.id === c.id) || { total: 0 }).total);
+      const tot = E.round2(data.reduce((acc, d) => acc + catTotal(d, c.id), 0));
+      const a = avg((d) => catTotal(d, c.id));
       const b = (last.expenses.find((l) => l.cat.id === c.id) || { budget: 0 }).budget;
-      return { c, a, b };
-    }).sort((x, y) => y.a - x.a);
-    html += section('Moyenne par catégorie', null, `<div class="card"><table class="tbl">
-      <thead><tr><th>Catégorie</th><th>Moy. / mois</th><th>Budget</th></tr></thead>
-      <tbody>${rows.map(({ c, a, b }) => `<tr><td><span class="swatch inline" style="background:${slotColor(c)}"></span>${esc(c.name)}</td>
+      return { c, tot, a, b };
+    }).sort((x, y) => y.tot - x.tot);
+    html += section(`Par catégorie sur ${n} mois`, null, `<div class="card"><table class="tbl">
+      <thead><tr><th>Catégorie</th><th>Total</th><th>Moy./mois</th><th>Budget</th></tr></thead>
+      <tbody>${rows.map(({ c, tot, a, b }) => `<tr><td><span class="swatch inline" style="background:${slotColor(c)}"></span>${esc(c.name)}</td>
+        <td>${tot < 0 ? `<span class="pos">+${E.money(-tot)}</span>` : E.money(tot)}</td>
         <td class="${a > b ? 'neg' : ''}">${a > b ? '⚠️ ' : ''}${E.money(a)}</td><td>${E.money(b)}</td></tr>`).join('')}</tbody>
-    </table><p class="matrix-help" style="margin:10px 0 0">Moyenne calculée sur les mois où tu as saisi des opérations.</p></div>`);
+    </table><p class="matrix-help" style="margin:10px 0 0">Total = ce que la catégorie t'a coûté sur la période, gains déduits (en vert : tu as gagné plus que dépensé). Moyenne calculée sur les mois où tu as saisi des opérations.</p></div>`);
     return html;
+  }
+
+  /* ---------- Objectifs d'épargne ---------- */
+  // Progression = déjà mis de côté au départ + versements (opérations liées à l'objectif).
+  function goalProgress(g) {
+    const paid = state.transactions.filter((t) => t.goal === g.id).reduce((a, t) => a + t.amount, 0);
+    const saved = E.round2((Number(g.initial) || 0) + paid);
+    const target = Number(g.target) || 0;
+    const p = {
+      saved, target, left: E.round2(Math.max(0, target - saved)),
+      pct: target > 0 ? Math.max(0, Math.min(100, (saved / target) * 100)) : 0,
+      done: target > 0 && saved >= target, perMonth: null, monthsLeft: null,
+    };
+    if (g.deadline && !p.done && g.deadline >= today) {
+      const [y1, m1] = today.split('-').map(Number);
+      const [y2, m2] = g.deadline.split('-').map(Number);
+      // Mois restants, celui en cours compris… sauf s'il a déjà eu son versement.
+      const paidThisMonth = state.transactions.some((t) => t.goal === g.id && t.amount > 0 && t.date.slice(0, 7) === today.slice(0, 7));
+      p.monthsLeft = Math.max(1, (y2 - y1) * 12 + (m2 - m1) + (paidThisMonth ? 0 : 1));
+      p.perMonth = E.round2(p.left / p.monthsLeft);
+    }
+    return p;
+  }
+
+  function renderGoals() {
+    if (!state.goals.length) {
+      return `<div class="card">${empty('🎯', "Aucun objectif pour l'instant. Appuie sur <b>+</b> pour en créer un (vacances, permis, nouvelle console…). Chaque somme mise de côté est comptée dans ton budget du mois.")}</div>`;
+    }
+    return state.goals.map((g) => {
+      const p = goalProgress(g);
+      const cat = bcatById(g.cat);
+      let plan = '';
+      if (p.done) plan = '🎉 Objectif atteint, bravo !';
+      else if (g.deadline && g.deadline < today) plan = `⚠️ Date visée dépassée (${E.parse(g.deadline).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })})`;
+      else if (p.perMonth != null) plan = `Pour le ${E.parse(g.deadline).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} : ≈ <b>${E.money(p.perMonth)}</b> par mois pendant ${p.monthsLeft} mois`;
+      return `<div class="card goal">
+        <div class="goal-head tap" data-edit-goal="${g.id}"><b>${esc(g.name)}</b><span class="${p.done ? 'pos' : ''}">${Math.round(p.pct)} %</span></div>
+        <div class="meter"><i style="width:${p.pct}%;${p.done ? 'background:var(--pos)' : ''}"></i></div>
+        <div class="goal-nums"><span><b>${E.money(p.saved)}</b> sur ${E.money(p.target)}</span>${p.done ? '' : `<span>reste ${E.money(p.left)}</span>`}</div>
+        ${plan ? `<p class="goal-plan">${plan}</p>` : ''}
+        <div class="goal-foot">
+          <small>${cat ? `Versements comptés dans «&nbsp;${esc(cat.name)}&nbsp;»` : ''}</small>
+          <button class="btn primary small" data-deposit="${g.id}">+ Mettre de côté</button>
+        </div>
+      </div>`;
+    }).join('');
   }
 
   /* ---------- Vue : Calendrier ---------- */
@@ -467,24 +515,23 @@
     const numSelect = (key, max) => `<select data-setting="${key}">${Array.from({ length: max + 1 }, (_, i) => i)
       .map((i) => `<option value="${i}" ${s[key] === i ? 'selected' : ''}>${i} jour${i > 1 ? 's' : ''}</option>`).join('')}</select>`;
 
+    const S = window.Sync;
+    const signedIn = !!(S && S.user);
     let status;
     if (!p.supported) status = '<span class="status warn">Notifications non disponibles sur ce navigateur</span>';
-    else if (p.permission === 'denied') status = '<span class="status warn">Notifications bloquées dans les réglages du téléphone</span>';
-    else if (p.changed) status = '<span class="status warn">Abonnement modifié : recopie la configuration dans GitHub</span>';
-    else if (p.config) status = '<span class="status ok">Notifications activées sur ce téléphone</span>';
-    else status = '<span class="status">Notifications pas encore activées</span>';
+    else if (p.permission === 'denied') status = '<span class="status warn">Notifications bloquées dans les réglages de l’appareil</span>';
+    else if (p.registered) status = '<span class="status ok">Activé sur cet appareil</span>';
+    else if (!signedIn) status = '<span class="status">Connecte-toi d’abord (carte Synchronisation ci-dessus)</span>';
+    else status = '<span class="status">Pas encore activé sur cet appareil</span>';
 
     const notif = `<div class="card">
       <h3>🔔 Résumé du matin (8h)</h3>
       ${status}
-      <p>Chaque matin, GitHub envoie un « réveil » à ton téléphone, qui affiche le résumé construit avec tes données (elles ne quittent jamais le téléphone).</p>
-      ${p.config ? `<p><b>Étape 2 :</b> copie ce texte dans le secret GitHub <code>PUSH_CONFIG</code> (voir le guide README).</p>
-        <pre class="config">${esc(p.config)}</pre>` : ''}
+      <p>Chaque matin à 8h : tes tâches du jour, les paiements à venir et où tu en es de ton budget, y compris ce que tu as ajouté depuis le PC.</p>
       <div class="btns">
-        ${p.supported && !p.config ? '<button class="btn primary small" data-action="enable-push">1. Activer les notifications</button>' : ''}
-        ${p.supported && p.changed ? '<button class="btn primary small" data-action="enable-push">Mettre à jour</button>' : ''}
-        ${p.config ? '<button class="btn primary small" data-action="copy-config">Copier la configuration</button>' : ''}
-        ${p.supported ? '<button class="btn small" data-action="test-notif">Tester le résumé</button>' : ''}
+        ${p.supported && signedIn && !p.registered ? '<button class="btn primary small" data-action="enable-push">Activer sur cet appareil</button>' : ''}
+        ${p.registered ? '<button class="btn small" data-action="disable-push">Désactiver</button>' : ''}
+        ${p.supported ? '<button class="btn small" data-action="test-notif">Aperçu du résumé</button>' : ''}
       </div>
     </div>`;
 
@@ -576,6 +623,7 @@
     const S = window.Sync;
     const dot = !S || !S.user ? '' : S.status === 'synced' ? 'ok' : S.status === 'error' ? 'err' : 'wait';
     $('#btn-settings').dataset.sync = dot;
+    if (S && S.user) autoRefreshDevice();
     if (view === 'settings') render();
   }
 
@@ -787,7 +835,9 @@
     ui.lastTxCat[type] = cat;
     ui.budgetMonth = data.date.slice(0, 7);
     save(); closeSheet(); render();
-    toast(id ? 'Opération modifiée' : type === 'income' ? 'Revenu ajouté' : 'Dépense ajoutée');
+    const alert = !id && type === 'expense' && amount > 0 ? budgetAlert(cat, data.date, amount) : null;
+    if (alert) toast(alert, null, 5000);
+    else toast(id ? 'Opération modifiée' : type === 'income' ? 'Revenu ajouté' : 'Dépense ajoutée');
   }
 
   function openBudgetCat(id) {
@@ -820,6 +870,90 @@
         <button class="btn primary">Enregistrer</button>
       </div>
     </form>`);
+  }
+
+  function openGoalForm(id) {
+    const g = state.goals.find((x) => x.id === id) || { name: '', target: '', deadline: '', initial: '', cat: '' };
+    const expCats = state.budgetCats.filter((c) => c.type === 'expense');
+    const defCat = g.cat || (expCats.find((c) => c.id === 'dep-invest') || expCats[0] || {}).id;
+    openSheet(`<form id="goal-form" data-id="${id || ''}">
+      <h2>${id ? "Modifier l'objectif" : 'Nouvel objectif'}</h2>
+      <label class="field"><span>Objectif</span><input name="name" required maxlength="80" value="${esc(g.name)}" placeholder="Ex. : Vacances d'été" autofocus></label>
+      <div class="grid2">
+        <label class="field"><span>Montant visé (€)</span><input type="number" name="target" required min="1" step="0.01" inputmode="decimal" value="${esc(g.target)}"></label>
+        <label class="field"><span>Pour le (option)</span><input type="date" name="deadline" value="${esc(g.deadline)}"></label>
+      </div>
+      <label class="field"><span>Déjà mis de côté (€)</span><input type="number" name="initial" min="0" step="0.01" inputmode="decimal" value="${esc(g.initial)}" placeholder="0">
+        <small>Ce que tu as déjà avant de commencer le suivi.</small></label>
+      <label class="field"><span>Catégorie du budget pour les versements</span><select name="cat">${bcatOptions('expense', defCat)}</select>
+        <small>Chaque somme mise de côté sera comptée dans cette catégorie de ton budget du mois.</small></label>
+      <div class="actions">
+        ${id ? '<button type="button" class="btn danger" data-action="delete-goal">Supprimer</button>' : '<button type="button" class="btn" data-action="close-sheet">Annuler</button>'}
+        <button class="btn primary">Enregistrer</button>
+      </div>
+    </form>`);
+  }
+
+  function saveGoalForm(form) {
+    const fd = new FormData(form);
+    const id = form.dataset.id;
+    const data = {
+      name: fd.get('name').trim(),
+      target: parseAmount(fd.get('target')) || 0,
+      deadline: fd.get('deadline') || '',
+      initial: parseAmount(fd.get('initial')) || 0,
+      cat: fd.get('cat') || '',
+    };
+    if (!data.name || !(data.target > 0)) return;
+    if (id) Object.assign(state.goals.find((x) => x.id === id), data);
+    else state.goals.push(Object.assign({ id: uid(), createdAt: today }, data));
+    save(); closeSheet(); render();
+    toast(id ? 'Objectif modifié' : 'Objectif créé 🎯');
+  }
+
+  function openDepositForm(goalId) {
+    const g = state.goals.find((x) => x.id === goalId);
+    if (!g) return;
+    const p = goalProgress(g);
+    openSheet(`<form id="deposit-form" data-goal="${g.id}">
+      <h2>Mettre de côté</h2>
+      <p class="sheet-sub" style="text-transform:none">${esc(g.name)} · ${E.money(p.saved)} sur ${E.money(p.target)}</p>
+      <label class="field"><span>Montant (€)</span><input type="number" name="amount" required min="0.01" step="0.01" inputmode="decimal" value="${p.perMonth != null ? p.perMonth : ''}" autofocus></label>
+      <label class="field"><span>Date</span><input type="date" name="date" required value="${today}"></label>
+      <label class="toggle"><div><b>C'est un retrait</b><small>Tu reprends de l'argent mis de côté pour cet objectif</small></div>
+        <input type="checkbox" class="switch" name="withdraw"></label>
+      <div class="actions">
+        <button type="button" class="btn" data-action="close-sheet">Annuler</button>
+        <button class="btn primary">Valider</button>
+      </div>
+    </form>`);
+  }
+
+  function saveDepositForm(form) {
+    const fd = new FormData(form);
+    const g = state.goals.find((x) => x.id === form.dataset.goal);
+    let amount = parseAmount(fd.get('amount'));
+    if (!g || !(amount > 0)) return;
+    if (!bcatById(g.cat)) { toast("La catégorie de cet objectif n'existe plus : modifie l'objectif."); return; }
+    if (fd.get('withdraw') === 'on') amount = -amount;
+    const wasDone = goalProgress(g).done;
+    state.transactions.push({ id: uid(), date: fd.get('date'), cat: g.cat, amount, label: `Épargne : ${g.name}`, goal: g.id });
+    save(); closeSheet(); render();
+    const p = goalProgress(g);
+    toast(p.done && !wasDone ? `🎉 Objectif « ${g.name} » atteint !` : `🎯 ${g.name} : ${Math.round(p.pct)} %`, null, 3500);
+  }
+
+  // Alerte quand une dépense fait passer une catégorie à 80 % ou au-delà de son budget.
+  function budgetAlert(catId, date, amount) {
+    const l = E.budgetMonth(state, date.slice(0, 7), today).expenses.find((x) => x.cat.id === catId);
+    if (!l || !(l.budget > 0)) return null;
+    const after = l.total;
+    const before = E.round2(after - amount);
+    if (after > l.budget) return `🔴 ${l.cat.name} : budget dépassé de ${E.money(E.round2(after - l.budget))}`;
+    if (after >= 0.8 * l.budget && before < 0.8 * l.budget) {
+      return `🟠 ${l.cat.name} : ${Math.round((after / l.budget) * 100)} % du budget utilisé, reste ${E.money(E.round2(l.budget - after))}`;
+    }
+    return null;
   }
 
   function saveBudgetCat(form) {
@@ -863,13 +997,13 @@
 
   /* ---------- Actions ---------- */
   let toastTimer;
-  function toast(msg, undo) {
+  function toast(msg, undo, ms) {
     const el = $('#toast');
     el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button type="button">Annuler</button>' : ''}`;
     if (undo) el.querySelector('button').onclick = () => { undo(); el.classList.remove('show'); };
     el.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove('show'), undo ? 5000 : 2200);
+    toastTimer = setTimeout(() => el.classList.remove('show'), ms || (undo ? 5000 : 2200));
   }
 
   function snapshotUndo(key) {
@@ -923,47 +1057,84 @@
     return keys;
   }
 
+  const swReady = () => Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(r, 4000))]);
+
+  async function deviceId() {
+    let id = await E.kvGet('deviceId');
+    if (!id) { id = uid(); await E.kvSet('deviceId', id); }
+    return id;
+  }
+  const deviceLabel = () => (/Android/i.test(navigator.userAgent) ? 'Téléphone Android'
+    : /iPhone|iPad/i.test(navigator.userAgent) ? 'iPhone' : 'Ordinateur');
+
   async function refreshPushStatus() {
     const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
     ui.push = { supported, permission: supported ? Notification.permission : 'denied' };
     if (!supported) return;
-    const saved = await E.kvGet('pushConfig');
-    const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(r, 4000))]);
+    const reg = await swReady();
     if (!reg) { ui.push.supported = false; return; }
     const sub = await reg.pushManager.getSubscription();
-    if (saved) {
-      ui.push.config = saved;
-      ui.push.changed = !sub || JSON.parse(saved).subscription.endpoint !== sub.endpoint;
+    ui.push.registered = !!sub && (await E.kvGet('pushEndpoint')) === sub.endpoint;
+  }
+
+  // Abonne cet appareil et l'enregistre en ligne : GitHub y trouvera où envoyer le résumé.
+  async function subscribeDevice(reg) {
+    const keys = await getVapidKeys();
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && sub.options.applicationServerKey && b64url(sub.options.applicationServerKey) !== keys.publicKey) {
+      await sub.unsubscribe(); sub = null;
     }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromB64url(keys.publicKey) });
+    await window.Sync.registerDevice(await deviceId(), {
+      label: deviceLabel(),
+      subject: location.protocol === 'https:' ? location.origin : 'mailto:echeances@localhost.invalid',
+      publicKey: keys.publicKey,
+      privateKey: keys.privateKey,
+      subscription: sub.toJSON(),
+    });
+    await E.kvSet('pushEndpoint', sub.endpoint);
   }
 
   async function enablePush() {
     try {
       const perm = await Notification.requestPermission();
       if (perm !== 'granted') {
-        toast('Notifications refusées : autorise-les dans les paramètres Android de l’app.');
+        toast('Notifications refusées : autorise-les dans les paramètres de l’appareil.');
         await refreshPushStatus(); render();
         return;
       }
-      const reg = await navigator.serviceWorker.ready;
-      const keys = await getVapidKeys();
-      let sub = await reg.pushManager.getSubscription();
-      if (sub && sub.options.applicationServerKey && b64url(sub.options.applicationServerKey) !== keys.publicKey) {
-        await sub.unsubscribe(); sub = null;
-      }
-      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromB64url(keys.publicKey) });
-      const config = JSON.stringify({
-        subject: location.protocol === 'https:' ? location.origin : 'mailto:echeances@localhost.invalid',
-        publicKey: keys.publicKey,
-        privateKey: keys.privateKey,
-        subscription: sub.toJSON(),
-      });
-      await E.kvSet('pushConfig', config);
+      await subscribeDevice(await navigator.serviceWorker.ready);
       await refreshPushStatus(); render();
-      toast('Notifications activées. Copie maintenant la configuration.');
+      toast('Résumé du matin activé sur cet appareil ✓');
     } catch (err) {
       console.error(err);
-      toast('Impossible d’activer les notifications : ' + err.message);
+      toast('Impossible d’activer les notifications : ' + err.message, null, 5000);
+    }
+  }
+
+  async function disablePush() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) await sub.unsubscribe();
+      await window.Sync.unregisterDevice(await deviceId());
+    } catch (err) { console.warn(err); }
+    await E.kvSet('pushEndpoint', null);
+    await refreshPushStatus(); render();
+    toast('Résumé du matin désactivé sur cet appareil');
+  }
+
+  // Si l'adresse de notification de l'appareil a changé (ça arrive), on la remet à jour en ligne.
+  let pushChecked = false;
+  async function autoRefreshDevice() {
+    if (pushChecked || !window.Sync || !window.Sync.user || !('Notification' in window) || Notification.permission !== 'granted') return;
+    pushChecked = true;
+    const saved = await E.kvGet('pushEndpoint');
+    const reg = saved && await swReady();
+    if (!reg) return;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub || sub.endpoint !== saved) {
+      try { await subscribeDevice(reg); await refreshPushStatus(); render(); } catch (e) { console.warn(e); }
     }
   }
 
@@ -981,7 +1152,7 @@
   function exportData() {
     const payload = { app: 'echeances', version: 2, exportedAt: new Date().toISOString(),
       tasks: state.tasks, subs: state.subs, categories: state.categories, settings: state.settings,
-      budgetCats: state.budgetCats, transactions: state.transactions, budgetOverrides: state.budgetOverrides };
+      budgetCats: state.budgetCats, transactions: state.transactions, budgetOverrides: state.budgetOverrides, goals: state.goals };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -998,7 +1169,7 @@
       const nTx = (data.transactions || []).length;
       if (!confirm(`Remplacer tes données actuelles par cette sauvegarde (${data.tasks.length} tâches, ${data.subs.length} abonnements, ${nTx} opérations de budget) ?`)) return;
       state = withDefaults({ tasks: data.tasks, subs: data.subs, categories: data.categories, settings: data.settings,
-        budgetCats: data.budgetCats, transactions: data.transactions, budgetOverrides: data.budgetOverrides });
+        budgetCats: data.budgetCats, transactions: data.transactions, budgetOverrides: data.budgetOverrides, goals: data.goals });
       await save(); render();
       toast('Sauvegarde importée');
     } catch (e) {
@@ -1008,13 +1179,13 @@
 
   /* ---------- Événements ---------- */
   document.addEventListener('click', (e) => {
-    const el = e.target.closest('[data-view], [data-view-link], [data-edit-task], [data-edit-sub], [data-edit-tx], [data-bcat], [data-btab], [data-bmonth], [data-range], [data-bar], [data-goto-month], [data-filter], [data-cat], [data-cal-nav], [data-day], [data-action], #btn-settings, #fab');
+    const el = e.target.closest('[data-view], [data-view-link], [data-edit-task], [data-edit-sub], [data-edit-tx], [data-edit-goal], [data-deposit], [data-bcat], [data-btab], [data-bmonth], [data-range], [data-bar], [data-goto-month], [data-filter], [data-cat], [data-cal-nav], [data-day], [data-action], #btn-settings, #fab');
     if (!el) return;
     const d = el.dataset;
 
     if (el.id === 'btn-settings') return setView('settings');
     if (el.id === 'fab') {
-      if (view === 'budget') return ui.budgetTab === 'subs' ? openSubForm() : openTxForm();
+      if (view === 'budget') return ui.budgetTab === 'subs' ? openSubForm() : ui.budgetTab === 'goals' ? openGoalForm() : openTxForm();
       return openTaskForm(null, view === 'calendar' ? { due: ui.calSel } : {});
     }
     if (d.view) return setView(d.view);
@@ -1025,6 +1196,8 @@
     if (d.cat) { ui.taskCat = d.cat; return render(); }
     if (d.calNav) { ui.calMonth = E.addMonths(ui.calMonth, Number(d.calNav)); return render(); }
     if (d.editTx) return openTxForm(d.editTx);
+    if (d.editGoal) return openGoalForm(d.editGoal);
+    if (d.deposit) return openDepositForm(d.deposit);
     if (d.bcat) return openBudgetCat(d.bcat);
     if (d.btab) { ui.budgetTab = d.btab; return render(); }
     if (d.bmonth) { ui.budgetMonth = E.addMonthsYm(ui.budgetMonth, Number(d.bmonth)); ui.statsSel = null; return render(); }
@@ -1066,11 +1239,16 @@
       case 'sync-signout':
         if (!confirm('Se déconnecter ? Tes données restent sur cet appareil mais ne seront plus synchronisées.')) return;
         return window.Sync.signOut();
-      case 'copy-config':
-        navigator.clipboard.writeText(ui.push.config)
-          .then(() => toast('Configuration copiée'))
-          .catch(() => toast('Copie impossible : sélectionne le texte à la main'));
+      case 'disable-push': return disablePush();
+      case 'delete-goal': {
+        const id = $('#goal-form').dataset.id;
+        const g = state.goals.find((x) => x.id === id);
+        if (!confirm(`Supprimer l'objectif « ${g.name} » ? Les sommes déjà mises de côté restent dans ton budget.`)) return;
+        state.goals = state.goals.filter((x) => x.id !== id);
+        state.transactions.forEach((t) => { if (t.goal === id) delete t.goal; });
+        save(); closeSheet(); render(); toast('Objectif supprimé');
         return;
+      }
       case 'test-notif': return testNotification();
       case 'add-cat':
         state.categories.push({ id: uid(), name: 'Nouvelle catégorie', color: '#0ea5e9' });
@@ -1153,6 +1331,8 @@
     if (e.target.id === 'sub-form') saveSubForm(e.target);
     if (e.target.id === 'tx-form') saveTxForm(e.target);
     if (e.target.id === 'bcat-form') saveBudgetCat(e.target);
+    if (e.target.id === 'goal-form') saveGoalForm(e.target);
+    if (e.target.id === 'deposit-form') saveDepositForm(e.target);
   });
 
   // La matrice et les listes se recalculent quand la date change (app restée ouverte, retour au premier plan).
@@ -1173,6 +1353,18 @@
     render();
     stateReady = true;
     attachSync();
+    // Raccourcis (appui long sur l'icône de l'app) : ouvrent directement le bon formulaire.
+    const action = new URLSearchParams(location.search).get('action');
+    if (action) {
+      history.replaceState(null, '', location.pathname);
+      if (action === 'add-expense' || action === 'add-income') {
+        view = 'budget'; ui.budgetTab = 'month'; ui.budgetMonth = today.slice(0, 7); render();
+        openTxForm(null, { type: action === 'add-income' ? 'income' : 'expense' });
+      } else if (action === 'add-task') {
+        view = 'tasks'; render();
+        openTaskForm();
+      }
+    }
     if ('serviceWorker' in navigator) {
       try { await navigator.serviceWorker.register('sw.js'); } catch (e) { console.warn('SW', e); }
     }

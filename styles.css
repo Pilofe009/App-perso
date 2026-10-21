@@ -360,3 +360,15 @@ pre.config {
 #btn-settings[data-sync="wait"]::after { background: var(--q-quick); }
 #btn-settings[data-sync="ok"]::after { background: #16a34a; }
 #btn-settings[data-sync="err"]::after { background: var(--danger); }
+
+/* ---------- Objectifs d'épargne ---------- */
+.goal .goal-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 16px; }
+.goal .goal-head span { font-weight: 700; font-variant-numeric: tabular-nums; }
+.goal .meter { margin: 10px 0 6px; height: 10px; }
+.goal-nums { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; color: var(--muted); }
+.goal-nums b { color: var(--text); }
+.goal-plan { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.goal-plan b { color: var(--text); }
+.goal-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.goal-foot small { color: var(--muted); font-size: 12px; }
+.seg-btn { font-size: 13px; }
