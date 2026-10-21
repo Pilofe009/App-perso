@@ -1344,7 +1344,13 @@
       render();
     }
   }
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkDayChange(); refreshPushStatus().then(render); } });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    checkDayChange();
+    refreshPushStatus().then(render);
+    // L'app installée est souvent juste remise au premier plan : on vérifie aussi s'il y a une mise à jour.
+    if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
+  });
   setInterval(checkDayChange, 60000);
 
   /* ---------- Démarrage ---------- */
@@ -1366,7 +1372,15 @@
       }
     }
     if ('serviceWorker' in navigator) {
-      try { await navigator.serviceWorker.register('sw.js'); } catch (e) { console.warn('SW', e); }
+      // Quand une nouvelle version s'installe, l'app se recharge toute seule (sauf pendant une saisie).
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || reloading || sheet.open) return;
+        reloading = true;
+        location.reload();
+      });
+      try { await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }); } catch (e) { console.warn('SW', e); }
     }
     await refreshPushStatus();
     render();

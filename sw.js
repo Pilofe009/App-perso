@@ -1,7 +1,7 @@
 /* Service worker : fonctionnement hors ligne + résumé du matin. */
 importScripts('./shared.js');
 
-const CACHE = 'echeances-v4';
+const CACHE = 'echeances-v5';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './shared.js', './sync.js', './firebase-config.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/badge-96.png',
@@ -34,8 +34,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+  // `no-cache` : toujours demander au serveur s'il y a du nouveau (GitHub Pages fait sinon
+  // garder les fichiers 10 min, et une mise à jour n'arrivait pas tout de suite).
+  const fresh = req.mode === 'navigate' ? fetch(req.url, { cache: 'no-cache' }) : fetch(req, { cache: 'no-cache' });
   event.respondWith(
-    fetch(req)
+    fresh
       .then((res) => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
         return res;
