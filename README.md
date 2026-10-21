@@ -75,11 +75,37 @@ Les tâches programmées de GitHub arrivent souvent avec plusieurs heures de ret
 
 C'est fini : chaque matin à 8h, tu recevras ton point du jour.
 
+### 5. Synchroniser téléphone et PC (Firebase)
+
+Pour retrouver les mêmes données sur le téléphone et sur le PC, elles sont stockées dans **ton propre projet Firebase** (gratuit, chez Google). L'app continue de fonctionner hors connexion et envoie les changements au retour du réseau.
+
+1. Va sur <https://console.firebase.google.com> et clique sur **Créer un projet**. Nom : `echeances`. Tu peux désactiver Google Analytics.
+2. **Connexion Google** : dans le menu, ouvre **Créer → Authentication**, clique sur **Commencer**, puis dans l'onglet *Sign-in method*, choisis **Google**, active-le, indique ton e-mail d'assistance et clique sur **Enregistrer**.
+   Ensuite, dans l'onglet **Paramètres**, ouvre **Domaines autorisés**, clique sur **Ajouter un domaine** et ajoute `pilofe009.github.io`.
+3. **Base de données** : ouvre **Créer → Firestore Database**, clique sur **Créer une base de données**, choisis l'emplacement `eur3 (europe-west)` puis le **mode production**.
+   Dans l'onglet **Règles**, remplace tout par le texte ci-dessous, puis clique sur **Publier** :
+   ```
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /users/{uid}/{document=**} {
+         allow read, write: if request.auth != null && request.auth.uid == uid;
+       }
+     }
+   }
+   ```
+   Ces règles garantissent que chaque compte Google ne peut lire et écrire que ses propres données.
+4. **Identifiants de l'app** : clique sur l'engrenage ⚙️, puis **Paramètres du projet**. Dans *Vos applications*, clique sur l'icône **Web `</>`**, donne-lui le nom `echeances` et clique sur **Enregistrer l'application**. Copie le bloc `firebaseConfig = { … }` affiché, et colle-le dans `firebase-config.js`, ou envoie-le à Claude. Ces identifiants ne sont pas secrets.
+5. Une fois l'app mise à jour, sur le téléphone **puis** sur le PC, ouvre ⚙️ **Réglages** et touche **Se connecter avec Google**. Ce qui est déjà sur le téléphone est conservé et envoyé en ligne.
+   Sur le PC, ouvre `https://pilofe009.github.io/App-perso/` dans Chrome ou Edge. Tu peux aussi l'installer comme une application, avec l'icône ⊕ dans la barre d'adresse.
+
 ---
 
 ## Bon à savoir
 
-- **Sauvegarde** : tes données ne sont que sur ce téléphone. Fais régulièrement un **Exporter** dans Réglages, par exemple pour l'envoyer sur ton Drive. Si tu changes de téléphone, utilise **Importer**.
+- **Sauvegarde** : sans synchronisation, tes données ne sont que sur ce téléphone. Fais régulièrement un **Exporter** dans Réglages, par exemple pour l'envoyer sur ton Drive. Si tu changes de téléphone, utilise **Importer**. Avec la synchronisation, tes données sont aussi en ligne dans ton projet Firebase.
+- **Pastille sur ⚙️** : verte = synchronisé, orange = envoi en cours ou hors ligne, rouge = erreur (le détail est dans Réglages).
+- **Résumé du matin et PC** : le résumé est construit sur le téléphone, avec les données de la dernière ouverture de l'app. Une tâche ajoutée sur le PC apparaît dans le résumé une fois l'app ouverte au moins une fois sur le téléphone.
 - **Notifications qui n'arrivent plus** : si l'app affiche « Notifications à reconfigurer », va dans Réglages, touche **Mettre à jour**, puis recopie la configuration dans le secret `PUSH_CONFIG`. GitHub t'envoie aussi un e-mail si l'envoi échoue.
 - **Batterie** : si les notifications arrivent en retard, dans les paramètres Android, va dans Applications, puis Chrome, puis Batterie, et choisis **Sans restriction**.
 - **Changer l'heure** : modifie simplement l'horaire de la tâche sur cron-job.org.
@@ -90,6 +116,7 @@ C'est fini : chaque matin à 8h, tu recevras ton point du jour.
 | Fichier | Rôle |
 |---|---|
 | `index.html`, `styles.css`, `app.js` | L'application |
+| `sync.js`, `firebase-config.js` | Synchronisation en ligne entre appareils (Firebase) |
 | `shared.js` | Calcul des dates, de la matrice et du résumé (partagé avec le service worker) |
 | `sw.js` | Service worker : mode hors ligne et affichage du résumé |
 | `manifest.webmanifest`, `icons/` | Installation sur l'écran d'accueil |

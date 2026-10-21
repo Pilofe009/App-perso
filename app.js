@@ -40,7 +40,11 @@
     return s;
   }
   async function load() { state = withDefaults((await E.kvGet('state')) || {}); }
-  const save = () => E.kvSet('state', state);
+  // Enregistre sur le téléphone, et en ligne si la synchronisation est active.
+  const save = () => {
+    if (window.Sync) window.Sync.push(state);
+    return E.kvSet('state', state);
+  };
   const catById = (id) => state.categories.find((c) => c.id === id);
   const bcatById = (id) => state.budgetCats.find((c) => c.id === id);
   const slotColor = (cat) => (cat && cat.slot != null && cat.slot < 8 ? `var(--c${cat.slot + 1})` : 'var(--c-other)');
@@ -530,10 +534,67 @@
 
     return `<div class="settings">
       <button class="back" data-action="back"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>Retour</button>
-      ${notif}${rules}${cats}${bcats}${data}
-      <p class="matrix-help" style="text-align:center">Échéances · v2</p>
+      ${syncCard()}${notif}${rules}${cats}${bcats}${data}
+      <p class="matrix-help" style="text-align:center">Échéances · v3</p>
     </div>`;
   }
+
+  const SYNC_LABELS = {
+    loading: ['', 'Chargement…'],
+    'signed-out': ['', 'Non connecté'],
+    syncing: ['warn', 'Synchronisation…'],
+    pending: ['warn', 'Envoi des modifications…'],
+    offline: ['warn', 'Hors ligne : tes changements seront envoyés au retour du réseau'],
+    synced: ['ok', 'Synchronisé'],
+    error: ['warn', 'Erreur de synchronisation'],
+  };
+
+  function syncCard() {
+    const S = window.Sync;
+    if (!S || !S.configured) {
+      return `<div class="card"><h3>☁️ Synchronisation téléphone ⇄ PC</h3>
+        <p>Pas encore configurée : tes données restent uniquement sur cet appareil.</p></div>`;
+    }
+    const [cls, label] = SYNC_LABELS[S.status] || ['', S.status];
+    return `<div class="card">
+      <h3>☁️ Synchronisation téléphone ⇄ PC</h3>
+      <span class="status ${S.user ? cls : ''}">${S.user ? label : 'Non connecté'}</span>
+      ${S.user
+        ? `<p>Connecté avec <b>${esc(S.user.email || S.user.name || '')}</b>. Tes tâches, abonnements et ton budget sont les mêmes sur tous tes appareils connectés à ce compte.</p>`
+        : '<p>Connecte-toi avec ton compte Google, ici et sur ton PC, pour retrouver les mêmes données partout. Ce qui est déjà sur cet appareil sera conservé et ajouté.</p>'}
+      ${S.error ? `<p class="neg">${esc(S.error)}</p>` : ''}
+      <div class="btns">
+        ${S.user
+          ? '<button class="btn small" data-action="sync-signout">Se déconnecter</button>'
+          : `<button class="btn primary small" data-action="sync-signin" ${S.status === 'loading' ? 'disabled' : ''}>Se connecter avec Google</button>`}
+      </div>
+    </div>`;
+  }
+
+  // Pastille sur le bouton Réglages : vert = synchronisé, orange = en attente, rouge = erreur.
+  function syncStatusChanged() {
+    const S = window.Sync;
+    const dot = !S || !S.user ? '' : S.status === 'synced' ? 'ok' : S.status === 'error' ? 'err' : 'wait';
+    $('#btn-settings').dataset.sync = dot;
+    if (view === 'settings') render();
+  }
+
+  // Données reçues d'un autre appareil (ou fusion au premier branchement).
+  function applyRemote(parts, firstLink) {
+    state = withDefaults(Object.assign({}, parts));
+    E.kvSet('state', state);
+    render();
+    if (firstLink) toast('Synchronisation activée ✓');
+  }
+
+  let stateReady = false;
+  let syncAttached = false;
+  function attachSync() {
+    if (!stateReady || !window.Sync || syncAttached) return;
+    syncAttached = true;
+    window.Sync.attach({ getState: () => state, onRemote: applyRemote, onStatus: syncStatusChanged });
+  }
+  window.addEventListener('sync-ready', attachSync);
 
   /* ---------- Rendu principal ---------- */
   function render() {
@@ -1001,6 +1062,10 @@
         return;
       }
       case 'enable-push': return enablePush();
+      case 'sync-signin': return window.Sync.signIn();
+      case 'sync-signout':
+        if (!confirm('Se déconnecter ? Tes données restent sur cet appareil mais ne seront plus synchronisées.')) return;
+        return window.Sync.signOut();
       case 'copy-config':
         navigator.clipboard.writeText(ui.push.config)
           .then(() => toast('Configuration copiée'))
@@ -1106,6 +1171,8 @@
   (async function start() {
     await load();
     render();
+    stateReady = true;
+    attachSync();
     if ('serviceWorker' in navigator) {
       try { await navigator.serviceWorker.register('sw.js'); } catch (e) { console.warn('SW', e); }
     }

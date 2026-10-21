@@ -1,9 +1,9 @@
 /* Service worker : fonctionnement hors ligne + résumé du matin. */
 importScripts('./shared.js');
 
-const CACHE = 'echeances-v2';
+const CACHE = 'echeances-v3';
 const ASSETS = [
-  './', './index.html', './styles.css', './app.js', './shared.js', './manifest.webmanifest',
+  './', './index.html', './styles.css', './app.js', './shared.js', './sync.js', './firebase-config.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/badge-96.png',
 ];
 
@@ -19,9 +19,19 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Bibliothèque Firebase (version fixe) : depuis le cache, pour démarrer même hors ligne.
+const FIREBASE_LIB = 'https://www.gstatic.com/firebasejs/';
+
 // Réseau d'abord (pour recevoir les mises à jour), cache si hors ligne.
 self.addEventListener('fetch', (event) => {
   const req = event.request;
+  if (req.method === 'GET' && req.url.startsWith(FIREBASE_LIB)) {
+    event.respondWith(caches.match(req).then((hit) => hit || fetch(req).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
+      return res;
+    })));
+    return;
+  }
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
   event.respondWith(
     fetch(req)

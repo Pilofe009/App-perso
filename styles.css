@@ -350,3 +350,13 @@ pre.config {
 .stat { min-width: 0; }
 .stats.money .stat { padding: 10px; }
 .stats.money .stat b { font-size: 17px; white-space: nowrap; letter-spacing: -.01em; }
+
+/* ---------- Synchronisation ---------- */
+#btn-settings { position: relative; }
+#btn-settings:is([data-sync="ok"], [data-sync="wait"], [data-sync="err"])::after {
+  content: ""; position: absolute; top: 9px; right: 9px; width: 9px; height: 9px; border-radius: 50%;
+  border: 2px solid var(--bg);
+}
+#btn-settings[data-sync="wait"]::after { background: var(--q-quick); }
+#btn-settings[data-sync="ok"]::after { background: #16a34a; }
+#btn-settings[data-sync="err"]::after { background: var(--danger); }
